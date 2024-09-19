@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Bot Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6">WhatsApp Bot Dashboard</h1>
+
+        <div class="bg-white shadow-md rounded p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Connection Status</h2>
+            <p id="status" class="text-lg"></p>
+            <div id="qrcode" class="mt-4"></div>
+        </div>
+
+        <div class="bg-white shadow-md rounded p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Auto-Reply Settings</h2>
+            <form id="autoReplyForm" class="space-y-4">
+                <div>
+                    <label for="keyword" class="block mb-1">Keyword:</label>
+                    <input type="text" id="keyword" name="keyword" required class="w-full px-3 py-2 border rounded">
+                </div>
+                <div>
+                    <label for="response" class="block mb-1">Response:</label>
+                    <textarea id="response" name="response" required class="w-full px-3 py-2 border rounded"></textarea>
+                </div>
+                <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Add
+                    Auto-Reply</button>
+            </form>
+            <div class="mt-6">
+                <h3 class="text-lg font-semibold mb-2">Current Auto-Replies</h3>
+                <ul id="autoReplyList" class="list-disc pl-5"></ul>
+            </div>
+        </div>
+
+        <div class="bg-white shadow-md rounded p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Send Message</h2>
+            <form id="sendForm" class="space-y-4">
+                <div>
+                    <label for="number" class="block mb-1">Phone Number:</label>
+                    <input type="text" id="number" name="number" required class="w-full px-3 py-2 border rounded" />
+                </div>
+                <div>
+                    <label for="message" class="block mb-1">Message:</label>
+                    <textarea id="message" name="message" required class="w-full px-3 py-2 border rounded"></textarea>
+                </div>
+                <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                    Send
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const status = document.getElementById("status");
+        const qrcode = document.getElementById("qrcode");
+        const sendForm = document.getElementById("sendForm");
+
+        socket.on("qr", (src) => {
+            qrcode.innerHTML = `<img src="${src}" alt="QR Code">`;
+            updateStatus();
+        });
+
+        socket.on("ready", () => {
+            qrcode.innerHTML = "";
+            updateStatus();
+        });
+
+        function updateStatus() {
+            fetch("/status")
+                .then((res) => res.json())
+                .then((data) => {
+                    status.textContent = `Status: ${data.status}`;
+                })
+                .catch((err) => {
+                    console.error("Error fetching status:", err);
+                    status.textContent = "Status: Error fetching status";
+                });
+        }
+
+        sendForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const number = document.getElementById("number").value;
+            const message = document.getElementById("message").value;
+
+            fetch("/send-message", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        number,
+                        message
+                    }),
+                })
+                .then((res) => res.json())
+                .then((data) => {
+                    if (data.success) {
+                        alert("Message sent successfully!");
+                    } else {
+                        alert("Failed to send message.");
+                    }
+                })
+                .catch((err) => {
+                    console.error("Error:", err);
+                    alert("An error occurred while sending the message.");
+                });
+        });
+
+        updateStatus();
+
+        const autoReplyForm = document.getElementById('autoReplyForm');
+        const autoReplyList = document.getElementById('autoReplyList');
+
+        autoReplyForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const keyword = document.getElementById('keyword').value;
+            const response = document.getElementById('response').value;
+
+            fetch('/add-auto-reply', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ keyword, response }),
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Auto-reply added successfully!');
+                    autoReplyForm.reset();
+                    updateAutoReplyList();
+                } else {
+                    alert('Failed to add auto-reply.');
+                }
+            })
+            .catch(err => {
+                console.error('Error:', err);
+                alert('An error occurred while adding the auto-reply.');
+            });
+        });
+
+        function updateAutoReplyList() {
+            fetch('/get-auto-replies')
+            .then(res => res.json())
+            .then(data => {
+                autoReplyList.innerHTML = '';
+                console.log(data);
+                data.forEach(reply => {
+                    const li = document.createElement('li');
+                    li.className = 'mb-2';
+                    li.innerHTML = `
+                        <strong>${reply.message}:</strong> ${reply.reply}
+                        <button onclick="deleteAutoReply('${reply.id}')" class="ml-2 text-red-500">Delete</button>
+                    `;
+                    autoReplyList.appendChild(li);
+                });
+            })
+            .catch(err => {
+                console.error('Error fetching auto-replies:', err);
+            });
+        }
+
+        function deleteAutoReply(id) {
+            fetch(`/delete-auto-reply/${id}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Auto-reply deleted successfully!');
+                    updateAutoReplyList();
+                } else {
+                    alert('Failed to delete auto-reply.');
+                }
+            })
+            .catch(err => {
+                console.error('Error:', err);
+                alert('An error occurred while deleting the auto-reply.');
+            });
+        }
+
+        // Initial load of auto-replies
+        updateAutoReplyList();
+    </script>
+</body>
+
+</html>

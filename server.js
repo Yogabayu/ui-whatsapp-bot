@@ -103,22 +103,14 @@ client.on("message", async (msg) => {
     return;
   }
 
-  if (msg.fromMe) {
-    for (const [id, reply] of autoReplies) {
-      if (msg.body.toLowerCase().includes(reply.keyword.toLowerCase())) {
-        await msg.reply(reply.response);
-        return; // Stop after first match
-      }
-    }
-  }
-
   isProcessingGroupMessage = false;
 
   console.log("Processing personal chat message");
 
-  for (const [id, reply] of autoReplies) {
-    if (msg.body.toLowerCase().includes(reply.keyword.toLowerCase())) {
-      await msg.reply(reply.response);
+  const replies = await db.promise().query("SELECT * FROM reply");
+  for (const reply of replies[0]) {
+    if (msg.body.toLowerCase().includes(reply.message.toLowerCase())) {
+      await msg.reply(reply.reply);
       return; // Stop after first match
     }
   }
@@ -189,7 +181,7 @@ io.on("connection", (socket) => {
   });
 });
 
-const autoReplies = new Map();
+// const autoReplies = new Map();
 
 app.post("/add-auto-reply", checkLogin, (req, res) => {
   //   const { keyword, response } = req.body;

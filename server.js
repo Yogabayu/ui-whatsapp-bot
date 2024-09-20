@@ -1,42 +1,42 @@
-const express = require("express");
-const mysql = require("mysql2");
-const bcrypt = require("bcrypt");
-const session = require("express-session");
-const bodyParser = require("body-parser");
-const path = require("path");
-const { Client, LocalAuth } = require("whatsapp-web.js");
-const qrcode = require("qrcode");
-const http = require("http");
-const socketIo = require("socket.io");
+const express = require("express"); // import library express
+const mysql = require("mysql2"); // import library mysql2
+const bcrypt = require("bcrypt"); // import library bcrypt
+const session = require("express-session"); // import library express-session
+const bodyParser = require("body-parser"); // import library body-parser
+const path = require("path"); // import library path
+const { Client, LocalAuth } = require("whatsapp-web.js"); // import library whatsapp-web
+const qrcode = require("qrcode"); // import library qrcode
+const http = require("http"); // import library http
+const socketIo = require("socket.io"); // import library socket.io
 
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server);
-const port = 3000;
+const app = express(); // buat objek app dari express
+const server = http.createServer(app); // buat server dari objek app
+const io = socketIo(server); // buat objek io dari server
+const port = 3000; // set port untuk server
 
 // Middleware
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
-app.use(express.static("public"));
+app.use(bodyParser.urlencoded({ extended: true })); // middleware untuk parse data dari body request
+app.use(bodyParser.json()); // middleware untuk parse data dari body request
+app.use(express.static("public")); // middleware untuk mengatur direktori public
 app.use(
   session({
-    secret: "thisisasecretkey",
-    resave: false,
-    saveUninitialized: true,
+    secret: "thisisasecretkey", // secret key untuk session
+    resave: false, // tidak menyimpan session jika tidak ada perubahan
+    saveUninitialized: true, // tidak menyimpan session jika belum ada perubahan
   })
 );
 
 // Database connection
 const db = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "yOg@21121998",
-  database: "whatsapp",
+  host: "localhost", // host database
+  user: "root", // username database
+  password: "yOg@21121998", // password database
+  database: "whatsapp", // nama database
 });
 
 db.connect((err) => {
   if (err) throw err;
-  console.log("Connected to database");
+  console.log("Connected to database"); // print jika berhasil terkoneksi dengan database
 });
 
 // WhatsApp Client Setup
@@ -44,22 +44,22 @@ const client = new Client({
   authStrategy: new LocalAuth(),
 });
 
-let connectionStatus = "Disconnected";
+let connectionStatus = "Disconnected"; // status koneksi whatsapp
 
 client.on("qr", (qr) => {
   qrcode.toDataURL(qr, (err, url) => {
-    io.emit("qr", url);
-    connectionStatus = "QR Code received, please scan";
+    io.emit("qr", url); // emit event qr code ke client
+    connectionStatus = "QR Code received, please scan"; // update status koneksi
   });
 });
 
 client.on("ready", () => {
-  connectionStatus = "Connected";
-  io.emit("ready");
+  connectionStatus = "Connected"; // update status koneksi
+  io.emit("ready"); // emit event ready ke client
 });
 
 // Add this at the top of your file, outside of any functions
-let isProcessingGroupMessage = false;
+let isProcessingGroupMessage = false; // flag untuk mengatur apakah sedang memproses pesan grup atau tidak
 
 // Override the client's sendMessage method to log all send attempts
 const originalSendMessage = client.sendMessage;
@@ -121,7 +121,7 @@ client.initialize();
 
 // Routes
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "views", "login.html"));
+  res.sendFile(path.join(__dirname, "views", "login.html")); // mengirimkan file login.html ke client
 });
 
 app.post("/login", (req, res) => {
@@ -157,11 +157,11 @@ const checkLogin = (req, res, next) => {
 };
 
 app.get("/dashboard", checkLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, "views", "dashboard.html"));
+  res.sendFile(path.join(__dirname, "views", "dashboard.html")); // mengirimkan file dashboard.html ke client
 });
 
 app.get("/status", checkLogin, (req, res) => {
-  res.json({ status: connectionStatus });
+  res.json({ status: connectionStatus }); // mengirimkan status koneksi ke client
 });
 
 app.post("/send-message", checkLogin, (req, res) => {
@@ -184,11 +184,6 @@ io.on("connection", (socket) => {
 // const autoReplies = new Map();
 
 app.post("/add-auto-reply", checkLogin, (req, res) => {
-  //   const { keyword, response } = req.body;
-  //   const id = Date.now().toString(); // Simple unique ID
-  //   autoReplies.set(id, { id, keyword, response });
-  //   res.json({ success: true, id });
-
   const { keyword, response } = req.body;
   db.query(
     "INSERT INTO reply ( message, reply) VALUES ( ?, ?)",
@@ -218,3 +213,4 @@ app.delete("/delete-auto-reply/:id", checkLogin, (req, res) => {
 server.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
+

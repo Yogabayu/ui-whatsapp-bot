@@ -1,127 +1,132 @@
-const express = require("express"); // import library express
-const mysql = require("mysql2"); // import library mysql2
-const bcrypt = require("bcrypt"); // import library bcrypt
-const session = require("express-session"); // import library express-session
-const bodyParser = require("body-parser"); // import library body-parser
-const path = require("path"); // import library path
-const { Client, LocalAuth } = require("whatsapp-web.js"); // import library whatsapp-web
-const qrcode = require("qrcode"); // import library qrcode
-const http = require("http"); // import library http
-const socketIo = require("socket.io"); // import library socket.io
+const express = require("express");
+const mysql = require("mysql2");
+const bcrypt = require("bcrypt");
+const session = require("express-session");
+const bodyParser = require("body-parser");
+const path = require("path");
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const qrcode = require("qrcode");
+const http = require("http");
+const socketIo = require("socket.io");
 
-const app = express(); // buat objek app dari express
-const server = http.createServer(app); // buat server dari objek app
-const io = socketIo(server); // buat objek io dari server
-const port = 3000; // set port untuk server
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+const port = 3000;
 
 // Middleware
-app.use(bodyParser.urlencoded({ extended: true })); // middleware untuk parse data dari body request
-app.use(bodyParser.json()); // middleware untuk parse data dari body request
-app.use(express.static("public")); // middleware untuk mengatur direktori public
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+app.use(express.static("public"));
 app.use(
   session({
-    secret: "thisisasecretkey", // secret key untuk session
-    resave: false, // tidak menyimpan session jika tidak ada perubahan
-    saveUninitialized: true, // tidak menyimpan session jika belum ada perubahan
+    secret: "thisisasecretkey",
+    resave: false,
+    saveUninitialized: true,
   })
 );
 
 // Database connection
 const db = mysql.createConnection({
-  host: "localhost", // host database
-  user: "root", // username database
-  password: "yOg@21121998", // password database
-  database: "whatsapp", // nama database
+  host: "localhost",
+  user: "root",
+  password: "",
+  database: "bot_wa",
 });
 
 db.connect((err) => {
   if (err) throw err;
-  console.log("Connected to database"); // print jika berhasil terkoneksi dengan database
+  console.log("Connected to database");
 });
 
 // WhatsApp Client Setup
 const client = new Client({
   authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  }
 });
 
-let connectionStatus = "Disconnected"; // status koneksi whatsapp
+let connectionStatus = "Disconnected";
 
+// QR Code Generation
 client.on("qr", (qr) => {
+  console.log("QR Code received");
+  connectionStatus = "QR Code received, please scan";
+  
   qrcode.toDataURL(qr, (err, url) => {
-    io.emit("qr", url); // emit event qr code ke client
-    connectionStatus = "QR Code received, please scan"; // update status koneksi
+    if (err) {
+      console.error("Error generating QR code:", err);
+      return;
+    }
+    io.emit("qr", url);
+    console.log("QR code URL generated and emitted to client");
   });
 });
 
 client.on("ready", () => {
-  connectionStatus = "Connected"; // update status koneksi
-  io.emit("ready"); // emit event ready ke client
+  console.log("WhatsApp client is ready!");
+  connectionStatus = "Connected";
+  io.emit("ready");
 });
 
-// Add this at the top of your file, outside of any functions
-let isProcessingGroupMessage = false; // flag untuk mengatur apakah sedang memproses pesan grup atau tidak
+client.on("authenticated", () => {
+  console.log("Client authenticated");
+  connectionStatus = "Authenticated";
+});
 
-// Override the client's sendMessage method to log all send attempts
-const originalSendMessage = client.sendMessage;
-client.sendMessage = function (chatId, content, options) {
-  console.log(`Attempt to send message to ${chatId}: ${content}`);
-  if (isProcessingGroupMessage) {
-    console.log("Blocked send attempt to group chat");
-    return Promise.resolve(); // Don't actually send the message
-  }
-  return originalSendMessage.call(this, chatId, content, options);
-};
+client.on("auth_failure", (msg) => {
+  console.error("Authentication failure:", msg);
+  connectionStatus = "Authentication failed";
+});
 
+// Message handling with improved group chat detection
 client.on("message", async (msg) => {
   console.log("--- New Message Received ---");
-  let chat;
+  
   try {
-    chat = await msg.getChat();
-    console.log(`Chat Type: ${chat.isGroup ? "Group" : "Personal"}`);
-    console.log(`Is Group (direct check): ${chat.isGroup}`);
-    console.log(
-      `Participant Count: ${
-        chat.participants ? chat.participants.length : "N/A"
-      }`
-    );
-  } catch (error) {
-    console.error("Error getting chat:", error);
-    return;
-  }
-
-  // Robust group chat check
-  const isGroupChat =
-    chat.isGroup || (chat.participants && chat.participants.length > 2);
-
-  if (isGroupChat) {
-    console.log("This is a group chat. Ignoring message.");
-    isProcessingGroupMessage = true;
-    // Set a timeout to reset the flag, in case the message processing is asynchronous
-    setTimeout(() => {
-      isProcessingGroupMessage = false;
-    }, 1000); // Reset after 1 second
-    return;
-  }
-
-  isProcessingGroupMessage = false;
-
-  console.log("Processing personal chat message");
-
-  const replies = await db.promise().query("SELECT * FROM reply");
-  for (const reply of replies[0]) {
-    if (msg.body.toLowerCase().includes(reply.message.toLowerCase())) {
-      await msg.reply(reply.reply);
-      return; // Stop after first match
+    // Check if message is from a group chat based on the ID format
+    const isGroup = msg.from.endsWith('@g.us');
+    const isBroadcast = msg.from.endsWith('@broadcast');
+    
+    console.log(`Message from: ${msg.from}`);
+    console.log(`Is Group Chat (by ID): ${isGroup}`);
+    console.log(`Is Broadcast: ${isBroadcast}`);
+    
+    if (isBroadcast) {
+      console.log("Message is a broadcast - ignoring");
+      return;
     }
+    // Skip processing if it's a group chat
+    if (isGroup) {
+      console.log("Message from group chat - ignoring");
+      return;
+    }
+    
+    console.log("Processing personal chat message");
+    console.log(`Message content: ${msg.body}`);
+    
+    // Process replies for personal chats only
+    const [replies] = await db.promise().query("SELECT * FROM reply");
+    for (const reply of replies) {
+      if (msg.body.toLowerCase().includes(reply.message.toLowerCase())) {
+        console.log(`Matched keyword: ${reply.message}`);
+        console.log(`Sending reply: ${reply.reply}`);
+        await msg.reply(reply.reply);
+        break; // Stop after first match
+      }
+    }
+  } catch (error) {
+    console.error("Error processing message:", error);
   }
+  
   console.log("--- Message Processing Complete ---");
 });
 
-client.initialize();
-
 // Routes
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "views", "login.html")); // mengirimkan file login.html ke client
+  res.sendFile(path.join(__dirname, "views", "login.html"));
 });
 
 app.post("/login", (req, res) => {
@@ -157,11 +162,11 @@ const checkLogin = (req, res, next) => {
 };
 
 app.get("/dashboard", checkLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, "views", "dashboard.html")); // mengirimkan file dashboard.html ke client
+  res.sendFile(path.join(__dirname, "views", "dashboard.html"));
 });
 
 app.get("/status", checkLogin, (req, res) => {
-  res.json({ status: connectionStatus }); // mengirimkan status koneksi ke client
+  res.json({ status: connectionStatus });
 });
 
 app.post("/send-message", checkLogin, (req, res) => {
@@ -176,17 +181,29 @@ app.post("/send-message", checkLogin, (req, res) => {
 
 io.on("connection", (socket) => {
   console.log("New client connected");
+  // Send current status when client connects
+  socket.emit("status", { status: connectionStatus });
+  
+  if (connectionStatus === "QR Code received, please scan") {
+    // Re-generate QR code for new connections if not authenticated
+    client.getState().then(state => {
+      if (state !== "CONNECTED") {
+        console.log("Requesting new QR code");
+        // This will trigger the qr event again
+        client.resetState();
+      }
+    });
+  }
+  
   socket.on("disconnect", () => {
     console.log("Client disconnected");
   });
 });
 
-// const autoReplies = new Map();
-
 app.post("/add-auto-reply", checkLogin, (req, res) => {
   const { keyword, response } = req.body;
   db.query(
-    "INSERT INTO reply ( message, reply) VALUES ( ?, ?)",
+    "INSERT INTO reply (message, reply) VALUES (?, ?)",
     [keyword, response],
     (err, results) => {
       if (err) throw err;
@@ -214,3 +231,6 @@ server.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
 
+// Initialize WhatsApp client
+console.log("Initializing WhatsApp client...");
+client.initialize();
